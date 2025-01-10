@@ -1,0 +1,6 @@
+# github.com/libdns/cloudflare v0.1.1
+## explicit; go 1.18
+github.com/libdns/cloudflare
+# github.com/libdns/libdns v0.2.2
+## explicit; go 1.18
+github.com/libdns/libdns

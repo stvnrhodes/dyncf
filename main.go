@@ -25,7 +25,7 @@ func getMyIP(recordType string) (net.IP, error) {
 	case "AAAA":
 		netType = "tcp6"
 	default:
-		return nil, fmt.Errorf("unknown ip type %v", recordType)
+		return nil, fmt.Errorf("unknown record type %v", recordType)
 	}
 	client := &http.Client{
 		Transport: &http.Transport{
