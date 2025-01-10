@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::error::Error;
+use std::net::{SocketAddr, ToSocketAddrs};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct CloudflareResponse<T> {
@@ -41,31 +42,27 @@ struct DnsUpdate {
 }
 
 struct Config {
-    auth_email: String,
-    auth_key: String,
+    api_token: String,
     domain: String,
 }
 
 impl Config {
     fn from_env() -> Result<Self, Box<dyn Error>> {
         Ok(Config {
-            auth_email: env::var("CF_AUTH_EMAIL")?,
-            auth_key: env::var("CF_API_TOKEN")?,
+            api_token: env::var("CLOUDFLARE_API_TOKEN")?,
             domain: env::var("CF_DOMAIN")?,
         })
     }
 }
 
 struct CloudflareClient {
-    auth_email: String,
-    auth_key: String,
+    bearer_token: String,
 }
 
 impl CloudflareClient {
-    fn new(auth_email: String, auth_key: String) -> Self {
+    fn new(api_token: String) -> Self {
         Self {
-            auth_email,
-            auth_key,
+            bearer_token: format!("Bearer {api_token}"),
         }
     }
 
@@ -74,8 +71,7 @@ impl CloudflareClient {
         url: &str,
     ) -> Result<CloudflareResponse<T>, Box<dyn Error>> {
         let response = ureq::get(url)
-            .set("X-Auth-Email", &self.auth_email)
-            .set("X-Auth-Key", &self.auth_key)
+            .set("Authorization", &self.bearer_token)
             .call()?
             .into_json()?;
         Ok(response)
@@ -87,8 +83,7 @@ impl CloudflareClient {
         json: &impl Serialize,
     ) -> Result<CloudflareResponse<T>, Box<dyn Error>> {
         let response = ureq::put(url)
-            .set("X-Auth-Email", &self.auth_email)
-            .set("X-Auth-Key", &self.auth_key)
+            .set("Authorization", &self.bearer_token)
             .set("Content-Type", "application/json")
             .send_json(json)?
             .into_json()?;
@@ -179,21 +174,49 @@ impl CloudflareClient {
 }
 
 fn get_ip_from_trace() -> Result<(Option<String>, Option<String>), Box<dyn Error>> {
-    let response = ureq::get("https://cloudflare.com/cdn-cgi/trace")
+    let v4agent = ureq::AgentBuilder::new()
+        .resolver(|addr: &str| match addr {
+            addr => addr.to_socket_addrs().map(|v| {
+                v.filter(|e| match e {
+                    SocketAddr::V4(_) => true,
+                    _ => false,
+                })
+                .collect()
+            }),
+        })
+        .build();
+    let v6agent = ureq::AgentBuilder::new()
+        .resolver(|addr: &str| match addr {
+            addr => addr.to_socket_addrs().map(|v| {
+                v.filter(|e| match e {
+                    SocketAddr::V6(_) => true,
+                    _ => false,
+                })
+                .collect()
+            }),
+        })
+        .build();
+
+    let v4response = v4agent
+        .get("https://cloudflare.com/cdn-cgi/trace")
+        .call()?
+        .into_string()?;
+    let v6response = v6agent
+        .get("https://cloudflare.com/cdn-cgi/trace")
         .call()?
         .into_string()?;
 
     let mut ipv4 = None;
     let mut ipv6 = None;
 
-    for line in response.lines() {
+    for line in v4response.lines() {
         if line.starts_with("ip=") {
-            let ip = line.trim_start_matches("ip=");
-            if ip.contains(':') {
-                ipv6 = Some(ip.to_string());
-            } else {
-                ipv4 = Some(ip.to_string());
-            }
+            ipv4 = Some(line.trim_start_matches("ip=").to_string());
+        }
+    }
+    for line in v6response.lines() {
+        if line.starts_with("ip=") {
+            ipv6 = Some(line.trim_start_matches("ip=").to_string());
         }
     }
 
@@ -202,7 +225,7 @@ fn get_ip_from_trace() -> Result<(Option<String>, Option<String>), Box<dyn Error
 
 fn main() -> Result<(), Box<dyn Error>> {
     let config = Config::from_env()?;
-    let client = CloudflareClient::new(config.auth_email, config.auth_key);
+    let client = CloudflareClient::new(config.api_token);
 
     println!("Starting DNS update for {}", config.domain);
 
@@ -222,6 +245,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Get current IP addresses from Cloudflare trace
     let (ipv4, ipv6) = get_ip_from_trace()?;
+
+    println!("Found ip addresses - IPv4: {:?}, IPv6: {:?}", ipv4, ipv6);
 
     // Update IPv4 record if available
     if let (Some(ipv4), Some(ipv4_id)) = (ipv4, ipv4_id) {
