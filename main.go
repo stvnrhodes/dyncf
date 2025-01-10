@@ -50,7 +50,6 @@ func getMyIP(recordType string) (net.IP, error) {
 func main() {
 	ctx := context.Background()
 
-	apitokenFile := flag.String("cloudflare-api-token-file", "", "File with cloudflare api token")
 	domain := flag.String("dns-domain", "", "Domain to update")
 	flag.Parse()
 
@@ -60,12 +59,12 @@ func main() {
 	}
 	zone := strings.Join(parts[len(parts)-2:], ".")
 	subdomain := strings.Join(parts[:len(parts)-2], ".")
+	slog.Info("parsed domain", "zone", zone, "subdomain", subdomain)
 
-	b, err := os.ReadFile(*apitokenFile)
-	if err != nil {
-		log.Fatalf("unable to read api token: %v", err)
+	apiToken := os.Getenv("CLOUDFLARE_API_TOKEN")
+	if apiToken == "" {
+		log.Fatal("CLOUDFLARE_API_TOKEN env var is missing")
 	}
-	apiToken := strings.TrimSpace(string(b))
 	provider := cloudflare.Provider{APIToken: apiToken}
 
 	var records []libdns.Record
@@ -80,6 +79,7 @@ func main() {
 			Value: addr.String(),
 			TTL:   5 * time.Minute,
 		})
+		slog.Info("will set record", "type", recordType, "value", addr)
 	}
 
 	result, err := provider.SetRecords(ctx, zone, records)
