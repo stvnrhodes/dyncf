@@ -5,5 +5,6 @@ Fetch current ip addresses and update a record in cloudflare with them. Addresse
 Run it with
 
 ```shell
-go run . -dns-domain mysubdomain.example.com -cloudflare-api-token-file file-with-token
+export CLOUDFLARE_API_TOKEN=<my-token>
+go run . -dns-domain mysubdomain.example.com
 ```
